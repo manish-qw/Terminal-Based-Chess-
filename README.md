@@ -1,113 +1,147 @@
-# Chess-Player-AI
+# Terminal-Based Chess AI
 
-A simple command-line chess AI implemented in C++ using the minimax algorithm with alpha-beta pruning. The program allows users to play against the AI or run performance benchmarks to evaluate the AI's search efficiency.
+A command-line chess game with an intelligent AI opponent powered by the **minimax algorithm with alpha-beta pruning**. Play against a strategic AI or benchmark its performance with detailed analytics.
 
 ## Features
 
-- **Playable Chess Game**: Play against the AI in a text-based interface.
-- **Minimax with Alpha-Beta Pruning**: The AI uses a depth-limited minimax algorithm with alpha-beta pruning for move selection.
-- **Board Evaluation**: Evaluates positions based on material, piece-square tables, mobility, and pawn structure.
-- **Move Generation**: Supports all legal chess moves, including castling, en passant, and promotions.
-- **Benchmarking**: Measures average time and nodes explored per move at various depths to assess performance.
-- **Standard Chess Rules**: Fully implements chess rules, including check, checkmate, stalemate, and draw conditions.
+- **Interactive Chess Gameplay** – Play as White against the AI opponent (Black) in real-time
+- **Advanced AI Engine** – Minimax algorithm with alpha-beta pruning for optimal move selection
+- **Sophisticated Position Evaluation** – Material counting, piece-square tables, mobility analysis, and pawn structure assessment
+- **Complete Move Support** – All legal moves including castling, en passant, and pawn promotion
+- **Comprehensive Rule Implementation** – Check, checkmate, stalemate, and draw detection
+- **Performance Benchmarking** – Analyze AI efficiency at different search depths with timing and node count metrics
+- **Cross-Platform** – Runs on Windows, Linux, and macOS
 
-## Installation
+## Quick Start
 
 ### Prerequisites
 
-- C++ compiler (e.g., `g++`) supporting C++11 or later
-- Make (optional, for using the provided Makefile)
-- Operating system: Windows, Linux, or macOS
+- **C++ Compiler** – GCC, Clang, or MSVC (C++11 or later)
+- **Make** (optional) – for convenient build
+- **Git** – to clone the repository
 
-### Steps
+### Installation & Setup
 
-1. Clone the repository:
+1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/chess-ai.git
-   cd chess-ai
+   git clone https://github.com/manish-qw/Terminal-Based-Chess-.git
+   cd Terminal-Based-Chess-
    ```
 
-2. Compile the code:
+2. **Compile the project:**
    ```bash
-   g++ -std=c++11 main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp -o chess
+   g++ -std=c++11 -O2 main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp -o chess
    ```
 
-3. Run the executable:
-   ```bash
-   ./chess
-   ```
-
-## Usage
-
-### Playing a Game
-
-1. Run the program to start a new game:
+3. **Run the game:**
    ```bash
    ./chess
    ```
 
-2. The game alternates between the human player (White by default) and the AI (Black).
+## How to Play
 
-3. Enter moves in algebraic notation (e.g., `e2e4` for moving a pawn from e2 to e4).
+### Game Basics
 
-4. For promotions, append the piece type (e.g., `e7e8Q` for promoting to a queen).
+1. **Start the game** by running the executable
+2. **You play as White** (first move)
+3. **AI plays as Black** (responds to your moves)
+4. Enter moves in **algebraic notation** (e.g., `e2e4`)
 
-5. The board is displayed after each move, with standard chess notation (a-h, 1-8).
+### Move Format
 
-6. The game ends with checkmate, stalemate, or a draw.
+- **Regular Move:** `e2e4` (from square to square)
+- **Pawn Promotion:** `e7e8Q` (promotes to Queen; use Q, R, B, or N)
+- **Case-Insensitive:** Both lowercase and uppercase are accepted
 
-### Running the Benchmark
+### Game Display
 
-To evaluate the AI's performance, uncomment the `benchmark();` call in `main.cpp`:
+The board is displayed using standard chess notation:
+- Columns: `a-h` (left to right)
+- Rows: `1-8` (bottom to top for White's perspective)
 
-```cpp
-int main() {
-    benchmark(); // Uncomment this line
-    std::cout << "Starting a new game..." << std::endl;
-    Game g;
-    g.play();
-    return 0;
-}
-```
+### Game Outcomes
 
-Recompile and run:
-```bash
-make
-./chess
-```
+- **Checkmate** – Game ends with winner declared
+- **Stalemate** – Draw condition when no legal moves available
+- **Insufficient Material** – Draw due to lack of pieces
+- **Fifty-Move Rule** – Draw after 50 moves without capture/pawn move
 
-The benchmark outputs average time and nodes explored per move for depths 1 to 4, helping assess search efficiency.
+### Benchmark Mode
 
-## File Structure
+Test the AI's search efficiency and performance:
 
-- `piece.h`: Defines Piece, Move, and GameState structs for chess pieces and moves.
-- `board.h` and `board.cpp`: Implements the Board class for game state, move generation, and evaluation.
-- `chess_ai.h` and `chess_ai.cpp`: Implements the ChessAI class with minimax and alpha-beta pruning.
-- `game.h` and `game.cpp`: Implements the Game class for managing gameplay and user interaction.
-- `benchmark.h` and `benchmark.cpp`: Implements the benchmark function for performance testing.
-- `main.cpp`: Entry point, initializes the game or benchmark.
-- `Makefile`: Simplifies compilation.
+1. **Uncomment benchmark in main.cpp:**
+   ```cpp
+   int main() {
+       benchmark();  // Uncomment this line
+       // Rest of main...
+   }
+   ```
 
-## Extensibility
+2. **Recompile and run:**
+   ```bash
+   g++ -std=c++11 -O2 main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp -o chess
+   ./chess
+   ```
 
-- **Enhance Evaluation**: Modify `Board::evaluate` in `board.cpp` to include additional terms (e.g., king safety, control of center).
-- **Optimize Search**: Add transposition tables or iterative deepening to `ChessAI::minimax` in `chess_ai.cpp`.
-- **Add Features**: Implement puzzle evaluation, time controls, or a graphical interface.
-- **Test Suites**: Integrate standard test suites (e.g., Bratko-Kopec, WAC) for tactical accuracy.
+3. **Output includes:**
+   - Average time per move at each depth
+   - Average nodes explored per move
+   - Nodes per second (search speed)
+   - Performance metrics for depths 1-4
+
+## Project Structure
+
+| File | Purpose |
+|------|---------|
+| `piece.h` | Core data structures: Piece, Move, GameState |
+| `board.h` / `board.cpp` | Board management, move generation, position evaluation |
+| `chess_ai.h` / `chess_ai.cpp` | AI engine: minimax algorithm with alpha-beta pruning |
+| `game.h` / `game.cpp` | Game loop, user interaction, move validation |
+| `benchmark.h` / `benchmark.cpp` | Performance testing and metrics |
+| `main.cpp` | Program entry point |
+
+## 🔧 Architecture & Algorithm
+
+### Minimax with Alpha-Beta Pruning
+
+The AI evaluates moves using a depth-limited minimax algorithm enhanced with alpha-beta pruning to reduce computational overhead:
+
+- **Minimax**: Recursively evaluates all possible moves to a given depth
+- **Alpha-Beta Pruning**: Eliminates branches that won't affect the final decision
+- **Configurable Depth**: Adjustable search depth (higher = stronger but slower)
+
+### Position Evaluation
+
+The evaluation function considers multiple factors:
+- **Material Value** – Numerical worth of each piece
+- **Piece-Square Tables** – Positional bonuses based on piece type and location
+- **Piece Mobility** – Number of available moves
+- **Pawn Structure** – Pawns' formation and advancement
 
 ## Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome! To contribute:
 
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature-name`).
-3. Commit changes (`git commit -m "Add feature"`).
-4. Push to the branch (`git push origin feature-name`).
-5. Open a pull request.
+1. **Fork** the repository
+2. **Create a feature branch**: `git checkout -b feature/your-feature`
+3. **Commit changes**: `git commit -m "Add descriptive message"`
+4. **Push to branch**: `git push origin feature/your-feature`
+5. **Open a Pull Request** with details about your changes
+
+### Reporting Issues
+
+Found a bug or have a suggestion? Please open an [Issue](https://github.com/manish-qw/Terminal-Based-Chess-/issues) with:
+- Clear description of the problem
+- Steps to reproduce (if applicable)
+- Expected vs actual behavior
 
 ## Acknowledgments
 
-- Inspired by chess programming tutorials and open-source engines.
-- Uses standard C++ libraries for portability.
+- Chess programming fundamentals inspired by classic sources and community tutorials
+- Built with pure C++ Standard Library for maximum portability
+- Thanks to the open-source community for guidance and inspiration
 
-Feel free to open issues or suggest improvements!
+---
+
+**Questions or feedback?** Open an issue or reach out. Happy chess playing!
