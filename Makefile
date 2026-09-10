@@ -1,7 +1,7 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra
 TARGET   := chess
-SRCS     := main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp
+SRCS     := main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp uci.cpp
 
 .PHONY: all clean
 

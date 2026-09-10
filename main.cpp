@@ -2,6 +2,7 @@
 #include "benchmark.h"
 #include "chess_ai.h"
 #include "board.h"
+#include "uci.h"
 #include <iostream>
 #include <cstring>
 #include <cstdlib>
@@ -47,7 +48,14 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    std::cout << "Terminal Chess AI  (--perft N | --bench for diagnostics)\n\n";
+    // ./chess --uci       → UCI protocol mode (for cutechess-cli / Arena)
+    if (argc >= 2 && std::strcmp(argv[1], "--uci") == 0) {
+        UCI uci;
+        uci.loop();
+        return 0;
+    }
+
+    std::cout << "Terminal Chess AI  (--perft N | --bench | --uci)\n\n";
     Game g;
     g.play();
     return 0;
