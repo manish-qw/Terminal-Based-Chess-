@@ -3,6 +3,8 @@
 A command-line chess engine written in C++17. Plays a complete game of chess with an AI opponent
 that uses **iterative-deepening alpha-beta minimax** with **MVV-LVA move ordering**.
 
+> **Benchmarks:** perft(5) passes ✅ · depth-4 search in 11 ms · 10.4× pruning improvement from MVV-LVA — see [BENCHMARKS.md](BENCHMARKS.md).
+
 ```
 8 r n b q k b n r
 7 p p p p p p p p

@@ -171,7 +171,7 @@ int ChessAI::negamax(Board& board, int depth, int alpha, int beta,
 // ── Iterative deepening root ─────────────────────────────────────────────────
 
 Move ChessAI::getBestMove(Board& board, Color aiColor,
-                           int timeLimitMsArg, int fixedDepth) {
+                           int timeLimitMsArg, int fixedDepth, bool silent) {
     // Init Zobrist once
     if (!zobristReady) { zobrist.init(); zobristReady = true; }
     // Clear TT
@@ -222,16 +222,19 @@ Move ChessAI::getBestMove(Board& board, Color aiColor,
 
         if (!stopSearch) {
             bestMove = depthBest;
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - searchStart).count();
-            std::cout << "  depth " << depth
-                      << "  score " << depthBestScore
-                      << "  nodes " << nodesExplored
-                      << "  time "  << elapsed << "ms\n";
+            if (!silent) {
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - searchStart).count();
+                std::cout << "  depth " << depth
+                          << "  score " << depthBestScore
+                          << "  nodes " << nodesExplored
+                          << "  time "  << elapsed << "ms\n";
+            }
         }
     }
 
-    std::cout << "Total nodes explored: " << nodesExplored << "\n";
+    if (!silent)
+        std::cout << "Total nodes explored: " << nodesExplored << "\n";
     return bestMove;
 }
 

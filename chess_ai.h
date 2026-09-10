@@ -43,8 +43,9 @@ public:
     ChessAI();
 
     // Time-based iterative deepening (timeLimitMs = 0 → use fixedDepth)
+    // silent=true suppresses per-depth output (used by benchmark)
     Move getBestMove(Board& board, Color aiColor,
-                     int timeLimitMs = 2000, int fixedDepth = 0);
+                     int timeLimitMs = 2000, int fixedDepth = 0, bool silent = false);
 
     // Perft: count leaf nodes at depth N (used to validate move generator)
     uint64_t perft(Board& board, Color color, int depth);
