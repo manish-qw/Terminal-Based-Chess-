@@ -23,7 +23,9 @@ void benchmark() {
             Color aiColor = WHITE;
 
             auto start = std::chrono::high_resolution_clock::now();
-            Move best = ai.getBestMove(board, aiColor, depth);
+            // timeLimitMs=0 → fixed-depth mode; fixedDepth=depth
+            Move best = ai.getBestMove(board, aiColor, /*timeLimitMs=*/0, /*fixedDepth=*/depth);
+            (void)best;
             auto end = std::chrono::high_resolution_clock::now();
 
             double duration = std::chrono::duration<double>(end - start).count();

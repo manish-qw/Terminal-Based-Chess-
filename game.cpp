@@ -161,11 +161,12 @@ void Game::playerTurn(Color color) {
 }
 
 void Game::aiTurn(Color color) {
-    std::cout << "AI is thinking..." << std::endl;
+    std::cout << "AI is thinking...\n";
     auto start = std::chrono::high_resolution_clock::now();
     
     try {
-        Move best = ai.getBestMove(board, color, 4);
+        // 2 000 ms time budget, iterative deepening
+        Move best = ai.getBestMove(board, color, /*timeLimitMs=*/2000, /*fixedDepth=*/0);
         auto end = std::chrono::high_resolution_clock::now();
         double moveTime = std::chrono::duration<double>(end - start).count();
         std::cout << "AI took " << moveTime << " seconds to decide the move.\n";

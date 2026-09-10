@@ -1,147 +1,94 @@
-# Terminal-Based Chess AI
+# Terminal Chess AI
 
-A command-line chess game with an intelligent AI opponent powered by the **minimax algorithm with alpha-beta pruning**. Play against a strategic AI or benchmark its performance with detailed analytics.
+A command-line chess engine written in C++17. Plays a complete game of chess with an AI opponent
+that uses **iterative-deepening alpha-beta minimax** with **MVV-LVA move ordering**.
+
+```
+8 r n b q k b n r
+7 p p p p p p p p
+6 . . . . . . . .
+5 . . . . . . . .
+4 . . . . P . . .
+3 . . . . . . . .
+2 P P P P . P P P
+1 R N B Q K B N R
+  a b c d e f g h
+
+AI is thinking... (depth 6, 0.91s)
+AI played: d7 to d5
+```
 
 ## Features
 
-- **Interactive Chess Gameplay** – Play as White against the AI opponent (Black) in real-time
-- **Advanced AI Engine** – Minimax algorithm with alpha-beta pruning for optimal move selection
-- **Sophisticated Position Evaluation** – Material counting, piece-square tables, mobility analysis, and pawn structure assessment
-- **Complete Move Support** – All legal moves including castling, en passant, and pawn promotion
-- **Comprehensive Rule Implementation** – Check, checkmate, stalemate, and draw detection
-- **Performance Benchmarking** – Analyze AI efficiency at different search depths with timing and node count metrics
-- **Cross-Platform** – Runs on Windows, Linux, and macOS
+| Feature | Detail |
+|---|---|
+| Move generation | All legal moves: castling, en passant, promotion |
+| Search | Alpha-beta minimax with iterative deepening |
+| Move ordering | MVV-LVA (captures sorted best-victim/worst-attacker first) |
+| Evaluation | Material + piece-square tables + mobility + pawn structure |
+| Time control | Configurable time budget (default 2 s) |
+| Correctness | Perft test suite validates the move generator |
+| CI | GitHub Actions builds and runs perft on every push |
 
-## Quick Start
+## Build
 
-### Prerequisites
+```bash
+git clone https://github.com/manish-qw/Terminal-Based-Chess-.git
+cd Terminal-Based-Chess-
+make
+```
 
-- **C++ Compiler** – GCC, Clang, or MSVC (C++11 or later)
-- **Make** (optional) – for convenient build
-- **Git** – to clone the repository
+Requires GCC/Clang with C++17 support. No external dependencies.
 
-### Installation & Setup
+## Run
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/manish-qw/Terminal-Based-Chess-.git
-   cd Terminal-Based-Chess-
-   ```
+```bash
+./chess           # play a game (you are White)
+./chess --perft 4 # verify move generator: must print 197281
+```
 
-2. **Compile the project:**
-   ```bash
-   g++ -std=c++11 -O2 main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp -o chess
-   ```
+### Move format
 
-3. **Run the game:**
-   ```bash
-   ./chess
-   ```
+```
+e2 e4          # regular move
+e7 e8 Q        # pawn promotion (Q / R / B / N)
+quit           # exit
+```
 
-## How to Play
+## How the AI works
 
-### Game Basics
+### Iterative Deepening
+The engine searches depth 1, then 2, then 3 … until the time budget expires.
+It always has a best move ready, so it never "thinks forever".
 
-1. **Start the game** by running the executable
-2. **You play as White** (first move)
-3. **AI plays as Black** (responds to your moves)
-4. Enter moves in **algebraic notation** (e.g., `e2e4`)
+### MVV-LVA Move Ordering
+Captures are scored by `10 × victim_value − attacker_value`.
+This means `PxQ` (+49) is tried before `QxP` (-4), so alpha-beta prunes far more branches.
 
-### Move Format
+### Perft
+`perft(N)` counts every legal leaf node at depth N from a position.
+The start position has exactly **20 / 400 / 8 902 / 197 281 / 4 865 609** nodes at depths 1–5.
+If your move generator is wrong (bad castling, en passant, check legality), perft will catch it.
 
-- **Regular Move:** `e2e4` (from square to square)
-- **Pawn Promotion:** `e7e8Q` (promotes to Queen; use Q, R, B, or N)
-- **Case-Insensitive:** Both lowercase and uppercase are accepted
+## Project structure
 
-### Game Display
+```
+piece.h          — Piece, Move, GameState structs
+board.h/cpp      — Board, move generation, evaluation
+chess_ai.h/cpp   — Minimax, MVV-LVA ordering, iterative deepening, perft
+game.h/cpp       — Game loop, user input
+benchmark.h/cpp  — Depth/time benchmarks
+main.cpp         — Entry point
+Makefile         — Build
+.github/         — CI
+```
 
-The board is displayed using standard chess notation:
-- Columns: `a-h` (left to right)
-- Rows: `1-8` (bottom to top for White's perspective)
+## Perft reference values (start position)
 
-### Game Outcomes
-
-- **Checkmate** – Game ends with winner declared
-- **Stalemate** – Draw condition when no legal moves available
-- **Insufficient Material** – Draw due to lack of pieces
-- **Fifty-Move Rule** – Draw after 50 moves without capture/pawn move
-
-### Benchmark Mode
-
-Test the AI's search efficiency and performance:
-
-1. **Uncomment benchmark in main.cpp:**
-   ```cpp
-   int main() {
-       benchmark();  // Uncomment this line
-       // Rest of main...
-   }
-   ```
-
-2. **Recompile and run:**
-   ```bash
-   g++ -std=c++11 -O2 main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp -o chess
-   ./chess
-   ```
-
-3. **Output includes:**
-   - Average time per move at each depth
-   - Average nodes explored per move
-   - Nodes per second (search speed)
-   - Performance metrics for depths 1-4
-
-## Project Structure
-
-| File | Purpose |
-|------|---------|
-| `piece.h` | Core data structures: Piece, Move, GameState |
-| `board.h` / `board.cpp` | Board management, move generation, position evaluation |
-| `chess_ai.h` / `chess_ai.cpp` | AI engine: minimax algorithm with alpha-beta pruning |
-| `game.h` / `game.cpp` | Game loop, user interaction, move validation |
-| `benchmark.h` / `benchmark.cpp` | Performance testing and metrics |
-| `main.cpp` | Program entry point |
-
-## 🔧 Architecture & Algorithm
-
-### Minimax with Alpha-Beta Pruning
-
-The AI evaluates moves using a depth-limited minimax algorithm enhanced with alpha-beta pruning to reduce computational overhead:
-
-- **Minimax**: Recursively evaluates all possible moves to a given depth
-- **Alpha-Beta Pruning**: Eliminates branches that won't affect the final decision
-- **Configurable Depth**: Adjustable search depth (higher = stronger but slower)
-
-### Position Evaluation
-
-The evaluation function considers multiple factors:
-- **Material Value** – Numerical worth of each piece
-- **Piece-Square Tables** – Positional bonuses based on piece type and location
-- **Piece Mobility** – Number of available moves
-- **Pawn Structure** – Pawns' formation and advancement
-
-## Contributing
-
-Contributions are welcome! To contribute:
-
-1. **Fork** the repository
-2. **Create a feature branch**: `git checkout -b feature/your-feature`
-3. **Commit changes**: `git commit -m "Add descriptive message"`
-4. **Push to branch**: `git push origin feature/your-feature`
-5. **Open a Pull Request** with details about your changes
-
-### Reporting Issues
-
-Found a bug or have a suggestion? Please open an [Issue](https://github.com/manish-qw/Terminal-Based-Chess-/issues) with:
-- Clear description of the problem
-- Steps to reproduce (if applicable)
-- Expected vs actual behavior
-
-## Acknowledgments
-
-- Chess programming fundamentals inspired by classic sources and community tutorials
-- Built with pure C++ Standard Library for maximum portability
-- Thanks to the open-source community for guidance and inspiration
-
----
-
-**Questions or feedback?** Open an issue or reach out. Happy chess playing!
+| Depth | Nodes |
+|-------|-------|
+| 1 | 20 |
+| 2 | 400 |
+| 3 | 8,902 |
+| 4 | 197,281 |
+| 5 | 4,865,609 |

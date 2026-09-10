@@ -1,0 +1,22 @@
+# Compiled binaries
+*.exe
+*.out
+chess
+
+# Object files
+*.o
+*.obj
+
+# Build directories
+build/
+bin/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS artifacts
+.DS_Store
+Thumbs.db
