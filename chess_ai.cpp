@@ -1,262 +1,385 @@
 #include "chess_ai.h"
 #include <iostream>
 #include <algorithm>
-#include <cstring>
-#include <random>
-#include <memory>
+#include <vector>
 
-// ── Constructor ──────────────────────────────────────────────────────────────────
-ChessAI::ChessAI() : tt(std::make_unique<TTEntry[]>(TT_SIZE)) {}
-
-// ── Zobrist implementation ───────────────────────────────────────────────────
-
-void Zobrist::init() {
-    std::mt19937_64 rng(0xDEADBEEFCAFEBABEULL); // fixed seed → reproducible
-    for (int c = 0; c < 2; c++)
-        for (int t = 0; t < 7; t++)
-            for (int r = 0; r < 8; r++)
-                for (int f = 0; f < 8; f++)
-                    pieceKeys[c][t][r][f] = rng();
-    sideKey = rng();
-    for (auto& k : castleKeys)   k = rng();
-    for (auto& k : enPassantKeys) k = rng();
+bool isSameMove(const Move& m1, const Move& m2) {
+    return m1.fromX == m2.fromX && m1.fromY == m2.fromY && m1.toX == m2.toX && m1.toY == m2.toY && m1.promotion == m2.promotion;
 }
 
-uint64_t Zobrist::computeHash(const Board& board, Color sideToMove) const {
-    uint64_t h = 0;
-    for (int r = 0; r < 8; r++) {
-        for (int f = 0; f < 8; f++) {
-            Piece p = board.getPiece(r, f);
-            if (p.type != EMPTY)
-                h ^= pieceKeys[p.color][p.type][r][f];
-        }
-    }
-    if (sideToMove == BLACK) h ^= sideKey;
-    if (board.gameState.whiteCanCastleKingside)  h ^= castleKeys[0];
-    if (board.gameState.whiteCanCastleQueenside) h ^= castleKeys[1];
-    if (board.gameState.blackCanCastleKingside)  h ^= castleKeys[2];
-    if (board.gameState.blackCanCastleQueenside) h ^= castleKeys[3];
-    if (board.gameState.hasEnPassant)
-        h ^= enPassantKeys[board.gameState.enPassantY];
-    return h;
-}
-
-// ── MVV-LVA ─────────────────────────────────────────────────────────────────
-// Piece values used only for ordering (not evaluation)
-// EMPTY=0, PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6
-// Score = 10 * victim - attacker → high = try first
-
-int ChessAI::mvvLva(PieceType victim, PieceType attacker) const {
-    return 10 * static_cast<int>(victim) - static_cast<int>(attacker);
-}
-
-void ChessAI::orderMoves(std::vector<Move>& moves, const Board& board,
-                          const Move& ttBest) const {
-    // Score every move, then stable-sort descending
-    auto score = [&](const Move& m) -> int {
-        // TT best move: always first
-        if (m.fromX == ttBest.fromX && m.fromY == ttBest.fromY &&
-            m.toX   == ttBest.toX   && m.toY   == ttBest.toY   &&
-            m.promotion == ttBest.promotion)
-            return 2'000'000;
-
-        Piece victim = board.getPiece(m.toX, m.toY);
-        if (victim.type != EMPTY) {
-            Piece attacker = board.getPiece(m.fromX, m.fromY);
-            // 1 000 000 base ensures captures beat all quiet moves
-            return 1'000'000 + mvvLva(victim.type, attacker.type);
-        }
-        if (m.promotion != EMPTY) return 900'000;
-        return 0; // quiet move
-    };
-
-    std::stable_sort(moves.begin(), moves.end(),
-                     [&](const Move& a, const Move& b) {
-                         return score(a) > score(b);
-                     });
-}
-
-// ── Time helpers ─────────────────────────────────────────────────────────────
-
-bool ChessAI::timeUp() const {
-    if (timeLimitMs == 0) return false; // fixed-depth mode
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - searchStart).count();
-    return elapsed >= timeLimitMs;
-}
-
-// ── Negamax with alpha-beta + TT ─────────────────────────────────────────────
-
-int ChessAI::negamax(Board& board, int depth, int alpha, int beta,
-                      Color currentTurn, uint64_t hash) {
-    nodesExplored++;
-
-    if (stopSearch) return 0;
-
-    // TT lookup
-    TTEntry& entry = tt[hash % TT_SIZE];
-    Move ttBest(0, 0, 0, 0);
-    if (entry.hash == hash && entry.depth >= depth) {
-        if (entry.flag == TT_EXACT) return entry.score;
-        if (entry.flag == TT_LOWER && entry.score > alpha) alpha = entry.score;
-        if (entry.flag == TT_UPPER && entry.score < beta)  beta  = entry.score;
-        if (alpha >= beta) return entry.score;
-        ttBest = entry.bestMove;
-    } else if (entry.hash == hash) {
-        ttBest = entry.bestMove; // still use best move for ordering
+int ChessAI::scoreMove(const Move& move, const Move& ttMove, const Board& board, int ply, Color currentTurn) {
+    if (isSameMove(move, ttMove)) {
+        return 2000000; // Best move from TT
     }
 
-    // Terminal / leaf
-    if (depth == 0) {
-        int s = board.evaluate();
-        return (currentTurn == WHITE) ? s : -s;
-    }
-    if (board.isCheckmate(currentTurn)) return -10'000 - depth; // sooner mate = worse
-    if (board.isStalemate(currentTurn) || board.isDraw()) return 0;
-
-    std::vector<Move> moves = board.generateLegalMoves(currentTurn);
-    if (moves.empty()) return 0;
-    orderMoves(moves, board, ttBest);
-
-    int origAlpha = alpha;
-    int bestScore = std::numeric_limits<int>::min() + 1;
-    Move bestMove = moves[0];
-
-    for (const Move& m : moves) {
-        if (stopSearch) break;
-
-        GameState prevState = board.gameState;
-        Piece captured = board.getPiece(m.toX, m.toY);
-
-        // Incremental hash update
-        uint64_t newHash = hash;
-        Piece moving = board.getPiece(m.fromX, m.fromY);
-        newHash ^= zobrist.pieceKeys[moving.color][moving.type][m.fromX][m.fromY];
-        if (captured.type != EMPTY)
-            newHash ^= zobrist.pieceKeys[captured.color][captured.type][m.toX][m.toY];
-        // Note: promotion/castling/en passant hashes handled approximately;
-        // exact incremental hash is complex — recompute from scratch for simplicity
-        newHash = zobrist.computeHash(board, currentTurn); // recompute after moves below
-
-        board.makeMove(m);
-        newHash = zobrist.computeHash(board, currentTurn == WHITE ? BLACK : WHITE);
-
-        int score = -negamax(board, depth - 1, -beta, -alpha,
-                              currentTurn == WHITE ? BLACK : WHITE, newHash);
-        board.undoMove(m, captured, prevState);
-
-        if (score > bestScore) {
-            bestScore = score;
-            bestMove  = m;
-        }
-        if (score > alpha) alpha = score;
-        if (alpha >= beta) break; // beta cutoff
+    Piece captured = board.getPiece(move.toX, move.toY);
+    if (captured.type != EMPTY) {
+        Piece moving = board.getPiece(move.fromX, move.fromY);
+        // MVV-LVA: Most Valuable Victim - Least Valuable Attacker
+        // Multiply by 100 to ensure victim type strictly dominates attacker penalty
+        return 1000000 + 100 * captured.type - moving.type;
     }
 
-    if (!stopSearch) {
-        // Store TT entry
-        TTFlag flag = TT_EXACT;
-        if      (bestScore <= origAlpha) flag = TT_UPPER;
-        else if (bestScore >= beta)      flag = TT_LOWER;
-        entry.hash     = hash;
-        entry.depth    = depth;
-        entry.score    = bestScore;
-        entry.flag     = flag;
-        entry.bestMove = bestMove;
+    if (move.promotion != EMPTY) {
+        return 900000;
     }
 
-    return bestScore;
+    if (ply < 100) {
+        if (enableKiller && isSameMove(move, killerMoves[ply][0])) return 800000;
+        if (enableKiller && isSameMove(move, killerMoves[ply][1])) return 700000;
+    }
+    return 0;
 }
 
-// ── Iterative deepening root ─────────────────────────────────────────────────
-
-Move ChessAI::getBestMove(Board& board, Color aiColor,
-                           int timeLimitMsArg, int fixedDepth, bool silent) {
-    // Init Zobrist once
-    if (!zobristReady) { zobrist.init(); zobristReady = true; }
-    // Clear TT
-    std::fill(tt.get(), tt.get() + TT_SIZE, TTEntry());
-
+Move ChessAI::getBestMove(Board& board, Color aiColor, int maxDepth) {
     nodesExplored = 0;
-    stopSearch    = false;
-    timeLimitMs   = timeLimitMsArg;
-    searchStart   = std::chrono::steady_clock::now();
+    stats.clear();
+    stopSearch = false;
+    startTime = std::chrono::steady_clock::now();
+    for(int i=0; i<100; i++) {
+        killerMoves[i][0] = Move(0,0,0,0);
+        killerMoves[i][1] = Move(0,0,0,0);
+    }
 
     Move bestMove(0, 0, 0, 0);
-    std::vector<Move> legalMoves = board.generateLegalMoves(aiColor);
-    if (legalMoves.empty()) return bestMove;
 
-    int maxDepth = (fixedDepth > 0) ? fixedDepth : 64; // 64 = effectively unlimited
-
-    for (int depth = 1; depth <= maxDepth; depth++) {
-        if (timeUp()) break;
-
-        int alpha = std::numeric_limits<int>::min() + 1;
-        int beta  = std::numeric_limits<int>::max() - 1;
-
-        Move depthBest = bestMove;
-        int  depthBestScore = std::numeric_limits<int>::min() + 1;
-
-        // Re-order root moves using previous iteration's TT best
-        std::vector<Move> rootMoves = legalMoves;
-        orderMoves(rootMoves, board, bestMove);
-
-        for (const Move& m : rootMoves) {
-            if (stopSearch || timeUp()) { stopSearch = true; break; }
-
-            GameState prevState = board.gameState;
-            Piece captured = board.getPiece(m.toX, m.toY);
-            board.makeMove(m);
-
-            uint64_t newHash = zobrist.computeHash(board, aiColor == WHITE ? BLACK : WHITE);
-            int score = -negamax(board, depth - 1, -beta, -alpha,
-                                  aiColor == WHITE ? BLACK : WHITE, newHash);
-            board.undoMove(m, captured, prevState);
-
-            if (score > depthBestScore) {
-                depthBestScore = score;
-                depthBest      = m;
-            }
-            if (score > alpha) alpha = score;
-        }
-
-        if (!stopSearch) {
-            bestMove = depthBest;
-            if (!silent) {
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - searchStart).count();
-                std::cout << "  depth " << depth
-                          << "  score " << depthBestScore
-                          << "  nodes " << nodesExplored
-                          << "  time "  << elapsed << "ms\n";
-            }
-        }
+    Board::MoveList initialLegalMoves;
+    board.generateLegalMoves(aiColor, initialLegalMoves);
+    if (initialLegalMoves.empty()) {
+        return bestMove; // Terminal state at root
     }
 
-    if (!silent)
-        std::cout << "Total nodes explored: " << nodesExplored << "\n";
+    for (int depth = 1; depth <= maxDepth; depth++) {
+        int alpha = std::numeric_limits<int>::min() + 1;
+        int beta = std::numeric_limits<int>::max() - 1;
+        int bestScore = std::numeric_limits<int>::min() + 1;
+        
+        Board::MoveList legalMoves;
+        board.generateLegalMoves(aiColor, legalMoves);
+        if (legalMoves.empty()) break;
+        
+        Move currentBestMove = bestMove;
+
+        int moveScores[256];
+        for (int i = 0; i < legalMoves.size(); i++) {
+            moveScores[i] = scoreMove(legalMoves[i], currentBestMove, board, 0, aiColor);
+        }
+
+        if (depth == 1 && legalMoves.size() > 0) {
+            int bestIdx = 0;
+            for (int j = 1; j < legalMoves.size(); j++) {
+                if (moveScores[j] > moveScores[bestIdx]) bestIdx = j;
+            }
+            currentBestMove = legalMoves[bestIdx];
+        }
+
+        for (int i = 0; i < legalMoves.size(); i++) {
+            int bestIdx = i;
+            for (int j = i + 1; j < legalMoves.size(); j++) {
+                if (moveScores[j] > moveScores[bestIdx]) bestIdx = j;
+            }
+            std::swap(legalMoves[i], legalMoves[bestIdx]);
+            std::swap(moveScores[i], moveScores[bestIdx]);
+            
+            const Move& move = legalMoves[i];
+            GameState prevState = board.gameState;
+            Piece captured = board.getPiece(move.toX, move.toY);
+            board.makeMove(move);
+            
+            int score = -negamax(board, depth - 1, 1, -beta, -alpha, aiColor == WHITE ? BLACK : WHITE, true);
+            
+            board.undoMove(move, captured, prevState);
+
+            if (stopSearch) break;
+            
+            if (score > bestScore) {
+                bestScore = score;
+                currentBestMove = move;
+            }
+            alpha = std::max(alpha, score);
+        }
+        
+        if (stopSearch && depth > 1) break; // Keep best move from previous depth if timed out
+        
+        bestMove = currentBestMove;
+        
+        // UCI info output
+        auto elapsed = std::chrono::steady_clock::now() - startTime;
+        long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+        if (ms == 0) ms = 1;
+        std::cerr << "info depth " << depth 
+                  << " score cp " << bestScore
+                  << " nodes " << nodesExplored
+                  << " time " << ms
+                  << " nps " << (nodesExplored * 1000 / ms)
+                  << " tthits " << stats.ttHits
+                  << " lmr " << stats.lmrReductions
+                  << " pvs " << stats.pvsResearches
+                  << " null " << stats.nullCutoffs
+                  << " qnodes " << stats.qNodes << std::endl;
+    }
+    
     return bestMove;
 }
 
-// ── Perft ────────────────────────────────────────────────────────────────────
-// Counts legal leaf nodes at the given depth.
-// Used to validate the move generator against known perft values.
-
-uint64_t ChessAI::perft(Board& board, Color color, int depth) {
-    if (depth == 0) return 1;
-
-    std::vector<Move> moves = board.generateLegalMoves(color);
-    if (depth == 1) return moves.size(); // optimisation: skip make/undo at leaves
-
-    uint64_t nodes = 0;
-    Color nextColor = (color == WHITE) ? BLACK : WHITE;
-
-    for (const Move& m : moves) {
-        GameState prevState = board.gameState;
-        Piece captured = board.getPiece(m.toX, m.toY);
-        board.makeMove(m);
-        nodes += perft(board, nextColor, depth - 1);
-        board.undoMove(m, captured, prevState);
+int ChessAI::negamax(Board& board, int depth, int ply, int alpha, int beta, Color currentTurn, bool allowNull) {
+    // Reverted back to 2048 to prevent huge syscall overhead on Windows
+    if ((nodesExplored & 2047) == 0) {
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count() >= timeLimitMs) {
+            stopSearch = true;
+        }
     }
-    return nodes;
+    
+    if (stopSearch) return 0;
+    
+    nodesExplored++;
+    
+    int originalAlpha = alpha;
+    unsigned long long hashKey = board.gameState.zobristKey;
+    int ttScore;
+    Move ttMove(0,0,0,0);
+    
+    if (ply > 0 && board.isRepetition()) {
+        return 0;
+    }
+    if (board.isDraw()) {
+        return 0;
+    }
+    
+    stats.ttProbes++;
+    bool hit;
+    if (tt.probe(hashKey, depth, ply, alpha, beta, ttScore, ttMove, hit)) {
+        if (hit) stats.ttHits++;
+        stats.ttUsableHits++;
+        stats.ttCutoffs++;
+        return ttScore;
+    } else if (hit) {
+        stats.ttHits++;
+    }
+    
+    // Cap maximum search depth to prevent stack overflow from runaway check extensions
+    if (depth == 0 || ply >= 64) {
+        return quiescence(board, ply, alpha, beta, currentTurn);
+    }
+    
+    bool inCheck = board.isInCheck(currentTurn);
+    
+    // Null Move Pruning: if we can pass our turn and still get a beta cutoff,
+    // the position is so good we can prune it.
+    if (enableNullMove && allowNull && depth >= 3 && !inCheck && board.hasNonPawnMaterial(currentTurn)) {
+        stats.nullAttempts++;
+        // Make null move: just flip side to move via Zobrist
+        GameState prevState = board.gameState;
+        board.gameState.zobristKey ^= Zobrist::sideKey;
+        if (board.gameState.hasEnPassant) {
+            board.gameState.zobristKey ^= Zobrist::enPassantKeys[board.gameState.enPassantY];
+            board.gameState.hasEnPassant = false;
+        }
+        
+        int R = (depth > 6) ? 3 : 2; // Adaptive reduction
+        int nullScore = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, 
+                                  currentTurn == WHITE ? BLACK : WHITE, false);
+        
+        board.gameState = prevState; // Undo null move
+        
+        if (stopSearch) return 0;
+        if (nullScore >= beta) {
+            stats.nullCutoffs++;
+            return beta;
+        }
+    }
+    
+    Board::MoveList moves;
+    board.generateMoves(currentTurn, moves);
+    
+    int moveScores[256];
+    for (int i = 0; i < moves.size(); i++) {
+        moveScores[i] = scoreMove(moves[i], ttMove, board, ply, currentTurn);
+    }
+    
+    int maxEval = std::numeric_limits<int>::min() + 1;
+    Move bestMoveForTT(0,0,0,0);
+    int moveCount = 0;
+    int legalMovesCount = 0;
+    
+    for (int i = 0; i < moves.size(); i++) {
+        int bestIdx = i;
+        for (int j = i + 1; j < moves.size(); j++) {
+            if (moveScores[j] > moveScores[bestIdx]) bestIdx = j;
+        }
+        std::swap(moves[i], moves[bestIdx]);
+        std::swap(moveScores[i], moveScores[bestIdx]);
+        
+        const Move& move = moves[i];
+        GameState prevState = board.gameState;
+        Piece captured = board.getPiece(move.toX, move.toY);
+        board.makeMove(move);
+        
+        if (board.isInCheck(currentTurn)) {
+            board.undoMove(move, captured, prevState);
+            continue;
+        }
+        
+        legalMovesCount++;
+        int extension = (inCheck) ? 1 : 0;
+        int nextDepth = depth - 1 + extension;
+        int eval;
+        
+        moveCount++;
+        
+        // Late Move Reductions: moves ordered late are unlikely to be best,
+        // so search them at reduced depth first
+        bool isCapture = (captured.type != EMPTY);
+        bool isTactical = isCapture || move.promotion != EMPTY;
+        bool givesCheck = board.isInCheck(currentTurn == WHITE ? BLACK : WHITE);
+        bool isKiller = (ply < 100) && (isSameMove(move, killerMoves[ply][0]) || isSameMove(move, killerMoves[ply][1]));
+        
+        int reduction = 0;
+        if (enableLMR && depth >= 3 && !inCheck && !isTactical && !givesCheck && !isKiller && moveCount > 4) {
+            reduction = 1;
+            // Only aggressively reduce deeper searches or very late moves
+            if (depth > 4 && moveCount > 6) reduction = 2;
+            if (depth > 6 && moveCount > 12) reduction = 3;
+        }
+        
+        if (moveCount == 1) {
+            eval = -negamax(board, nextDepth, ply + 1, -beta, -alpha, currentTurn == WHITE ? BLACK : WHITE, true);
+        } else {
+            // Try reduced depth first (LMR)
+            if (reduction > 0) {
+                stats.lmrAttempts++;
+                stats.lmrReductions++;
+            } else {
+                stats.pvsSearches++;
+            }
+            eval = -negamax(board, nextDepth - reduction, ply + 1, -alpha - 1, -alpha, currentTurn == WHITE ? BLACK : WHITE, true);
+            // Re-search at full depth if it looks promising
+            if (eval > alpha && (reduction > 0 || eval < beta)) {
+                if (reduction > 0) stats.lmrResearches++;
+                else stats.pvsResearches++;
+                eval = -negamax(board, nextDepth, ply + 1, -beta, -alpha, currentTurn == WHITE ? BLACK : WHITE, true);
+            }
+        }
+        
+        board.undoMove(move, captured, prevState);
+        
+        if (stopSearch) return 0;
+        
+        if (eval > maxEval) {
+            maxEval = eval;
+            bestMoveForTT = move;
+        }
+        
+        alpha = std::max(alpha, eval);
+        if (alpha >= beta) {
+            stats.betaCutoffs++;
+            if (moveCount == 1) stats.firstMoveCutoffs++;
+            
+            if (isKiller) stats.killerHits++;
+            
+            if (captured.type == EMPTY) {
+                if (ply < 100 && !isSameMove(move, killerMoves[ply][0])) {
+                    killerMoves[ply][1] = killerMoves[ply][0];
+                    killerMoves[ply][0] = move;
+                }
+            }
+            break;
+        }
+    }
+    
+    if (legalMovesCount == 0) {
+        if (inCheck) return -10000 + ply;
+        return 0; // Stalemate
+    }
+    
+    Bound bound = EXACT;
+    if (maxEval <= originalAlpha) bound = UPPER_BOUND;
+    else if (maxEval >= beta) bound = LOWER_BOUND;
+    
+    if (!stopSearch) {
+        bool collision;
+        tt.store(hashKey, depth, ply, maxEval, bound, bestMoveForTT, collision);
+        stats.ttStores++;
+        if (collision) stats.ttCollisions++;
+    }
+    
+    return maxEval;
+}
+
+int ChessAI::quiescence(Board& board, int ply, int alpha, int beta, Color currentTurn) {
+    if ((nodesExplored & 2047) == 0) {
+        auto autoNow = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(autoNow - startTime).count() >= timeLimitMs) {
+            stopSearch = true;
+        }
+    }
+    
+    if (stopSearch) return 0;
+    nodesExplored++;
+    stats.qNodes++;
+
+    bool inCheck = board.isInCheck(currentTurn);
+    int standPat = -10000;
+    
+    if (!inCheck) {
+        standPat = board.evaluate();
+        if (currentTurn == BLACK) standPat = -standPat;
+        if (standPat >= beta) return beta;
+        if (alpha < standPat) alpha = standPat;
+    }
+
+    Board::MoveList allMoves;
+    board.generateMoves(currentTurn, allMoves);
+    
+    Move qMoves[256];
+    int qScores[256];
+    int numMoves = 0;
+    
+    Move dummyTT(0,0,0,0);
+    for (int i = 0; i < allMoves.size(); i++) {
+        const Move& m = allMoves[i];
+        if (inCheck || board.getPiece(m.toX, m.toY).type != EMPTY || m.promotion != EMPTY) {
+            qMoves[numMoves] = m;
+            qScores[numMoves] = scoreMove(m, dummyTT, board, 100, currentTurn);
+            numMoves++;
+        }
+    }
+
+    int legalMovesCount = 0;
+
+    for (int i = 0; i < numMoves; i++) {
+        int bestIdx = i;
+        for (int j = i + 1; j < numMoves; j++) {
+            if (qScores[j] > qScores[bestIdx]) bestIdx = j;
+        }
+        std::swap(qMoves[i], qMoves[bestIdx]);
+        std::swap(qScores[i], qScores[bestIdx]);
+        
+        const Move& move = qMoves[i];
+        GameState prevState = board.gameState;
+        Piece captured = board.getPiece(move.toX, move.toY);
+        board.makeMove(move);
+        
+        if (board.isInCheck(currentTurn)) {
+            board.undoMove(move, captured, prevState);
+            continue;
+        }
+        
+        legalMovesCount++;
+        int score = -quiescence(board, ply + 1, -beta, -alpha, currentTurn == WHITE ? BLACK : WHITE);
+        
+        board.undoMove(move, captured, prevState);
+        
+        if (stopSearch) return 0;
+        
+        if (score >= beta) return beta;
+        if (score > alpha) alpha = score;
+    }
+    
+    if (legalMovesCount == 0 && inCheck) {
+        return -10000 + ply;
+    }
+    
+    return alpha;
 }
