@@ -5,13 +5,10 @@
 #include "chess_ai.h"
 #include <string>
 
-class UCI {
-public:
+namespace UCI {
     void loop();
-
-private:
-    static std::string moveToString(const Move& m);
-    static Move        parseMove(Board& board, Color color, const std::string& s);
-};
+    std::string moveToString(const Move& m);
+    Move parseMove(Board& board, Color color, const std::string& moveStr);
+}
 
 #endif // UCI_H
