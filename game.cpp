@@ -135,7 +135,8 @@ void Game::playerTurn(Color color) {
             }
         }
 
-        std::vector<Move> legalMoves = board.generateLegalMoves(color);
+        Board::MoveList legalMoves;
+        board.generateLegalMoves(color, legalMoves);
         bool found = false;
 
         for (const auto& move : legalMoves) {
@@ -161,12 +162,11 @@ void Game::playerTurn(Color color) {
 }
 
 void Game::aiTurn(Color color) {
-    std::cout << "AI is thinking...\n";
+    std::cout << "AI is thinking..." << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
     
     try {
-        // 2 000 ms time budget, iterative deepening
-        Move best = ai.getBestMove(board, color, /*timeLimitMs=*/2000, /*fixedDepth=*/0);
+        Move best = ai.getBestMove(board, color, 4);
         auto end = std::chrono::high_resolution_clock::now();
         double moveTime = std::chrono::duration<double>(end - start).count();
         std::cout << "AI took " << moveTime << " seconds to decide the move.\n";
