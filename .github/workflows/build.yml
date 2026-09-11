@@ -19,4 +19,4 @@ jobs:
         run: make
 
       - name: Perft smoke-test
-        run: ./chess --perft 4
+        run: ./Terminal-Chess perft
