@@ -1,0 +1,7 @@
+@echo off
+g++ -std=c++11 -O3 -march=native -flto -Wall -Wextra main.cpp board.cpp chess_ai.cpp game.cpp benchmark.cpp perft.cpp zobrist.cpp transposition_table.cpp uci.cpp -o Terminal-Chess.exe
+if %ERRORLEVEL% equ 0 (
+    echo Compilation successful!
+) else (
+    echo Compilation failed.
+)

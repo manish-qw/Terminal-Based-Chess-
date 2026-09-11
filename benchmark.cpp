@@ -2,246 +2,118 @@
 #include "board.h"
 #include "chess_ai.h"
 #include <iostream>
-#include <iomanip>
 #include <chrono>
-#include <thread>
-#include <string>
 #include <vector>
-#include <cstdint>
+#include <string>
+#include <iomanip>
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+struct BenchmarkPosition {
+    std::string name;
+    std::string fen;
+};
 
-static std::string commas(long long n) {
-    // Format a number with thousands separators  e.g. 197281 -> "197,281"
-    std::string s = std::to_string(n);
-    int pos = static_cast<int>(s.size()) - 3;
-    while (pos > 0) { s.insert(pos, ","); pos -= 3; }
-    return s;
-}
+void benchmark(int argc, char* argv[]) {
+    ChessAI ai;
+    ai.timeLimitMs = 1000000; // Disable time limit for benchmark testing
+    
+    // Parse ablation flags
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-no-null") ai.enableNullMove = false;
+        if (arg == "-no-lmr") ai.enableLMR = false;
+        if (arg == "-no-killer") ai.enableKiller = false;
+    }
 
-static void separator(char c = '-', int w = 70) {
-    std::cout << std::string(w, c) << "\n";
-}
-
-// ── Section 1: Perft speed benchmark ─────────────────────────────────────────
-// Measures how fast our move generator can count legal nodes at each depth.
-// Also double-checks correctness against known perft values.
-
-static void benchPerft() {
-    struct Case { int depth; uint64_t expected; };
-    const Case cases[] = {
-        {1, 20},
-        {2, 400},
-        {3, 8902},
-        {4, 197281},
-        // depth 5 = 4,865,609  — run only if depth 4 finishes fast
+    
+    std::vector<BenchmarkPosition> positions = {
+        {"Start Position", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"},
+        {"Kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"},
+        {"Middlegame", "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2N2N2/PPPP1PPP/R1BQK2R w KQkq - 6 5"},
+        {"Endgame", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"}
     };
+    
+    int depth = 4;
+    long long totalNodes = 0;
+    double totalTime = 0.0;
 
-    Board board;
-    ChessAI ai;
+    std::cout << "--- Starting Search Benchmark ---" << std::endl;
+    std::cout << "Search Depth: " << depth << std::endl << std::endl;
+    
+    std::cout << std::left << std::setw(20) << "Position"
+              << std::setw(15) << "Nodes"
+              << std::setw(15) << "Time (s)"
+              << std::setw(15) << "NPS" << std::endl;
+    std::cout << std::string(65, '-') << std::endl;
 
-    separator('=');
-    std::cout << "  PERFT — Move Generator Speed & Correctness\n";
-    separator('=');
-    std::cout << std::left
-              << std::setw(8)  << "Depth"
-              << std::setw(14) << "Nodes"
-              << std::setw(14) << "Expected"
-              << std::setw(10) << "OK?"
-              << std::setw(14) << "Time (ms)"
-              << std::setw(16) << "Nodes/sec"
-              << "\n";
-    separator();
+    ChessAI::SearchStats totalStats;
+    totalStats.clear();
 
-    double depth4Ms = 0;
-    for (const auto& c : cases) {
-        auto t0 = std::chrono::steady_clock::now();
-        uint64_t nodes = ai.perft(board, WHITE, c.depth);
-        auto t1 = std::chrono::steady_clock::now();
-
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        if (c.depth == 4) depth4Ms = ms;
-
-        double nps = (ms > 0) ? (nodes / (ms / 1000.0)) : 0;
-        bool ok = (nodes == c.expected);
-
-        std::cout << std::left
-                  << std::setw(8)  << c.depth
-                  << std::setw(14) << commas(nodes)
-                  << std::setw(14) << commas(c.expected)
-                  << std::setw(10) << (ok ? "PASS" : "FAIL")
-                  << std::setw(14) << std::fixed << std::setprecision(1) << ms
-                  << std::setw(16) << commas(static_cast<long long>(nps))
-                  << "\n";
-
-        // Small sleep between depths so CPU doesn't spike continuously
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    // Depth-5 only if depth-4 was fast (< 3s) — avoids freezing slow machines
-    if (depth4Ms < 3000) {
-        int d = 5;
-        uint64_t exp = 4865609ULL;
-        auto t0 = std::chrono::steady_clock::now();
-        uint64_t nodes = ai.perft(board, WHITE, d);
-        auto t1 = std::chrono::steady_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        double nps = (ms > 0) ? (nodes / (ms / 1000.0)) : 0;
-        bool ok = (nodes == exp);
-        std::cout << std::left
-                  << std::setw(8)  << d
-                  << std::setw(14) << commas(nodes)
-                  << std::setw(14) << commas(exp)
-                  << std::setw(10) << (ok ? "PASS" : "FAIL")
-                  << std::setw(14) << std::fixed << std::setprecision(1) << ms
-                  << std::setw(16) << commas(static_cast<long long>(nps))
-                  << "\n";
-    } else {
-        std::cout << "  (depth 5 skipped — depth 4 took " 
-                  << std::fixed << std::setprecision(0) << depth4Ms << " ms on this machine)\n";
-    }
-
-    separator();
-    std::cout << "\n";
-}
-
-// ── Section 2: Search benchmark ───────────────────────────────────────────────
-// Tests AI search speed at fixed depths from the start position.
-// Measures: time, nodes explored, nodes-per-second.
-// Depths 2-4 only (depth 5 can be very slow without full TT warm-up).
-
-static void benchSearch() {
-    separator('=');
-    std::cout << "  SEARCH — Alpha-Beta + MVV-LVA + TT  (from start position)\n";
-    separator('=');
-    std::cout << std::left
-              << std::setw(8)  << "Depth"
-              << std::setw(14) << "Time (ms)"
-              << std::setw(18) << "Nodes"
-              << std::setw(18) << "Nodes/sec"
-              << std::setw(12) << "Best move"
-              << "\n";
-    separator();
-
-    // Cap at depth 4 to avoid pegging CPU for minutes
-    for (int depth = 1; depth <= 4; depth++) {
+    for (const auto& pos : positions) {
         Board board;
-        ChessAI ai;
-
-        auto t0 = std::chrono::steady_clock::now();
-        Move best = ai.getBestMove(board, WHITE, /*timeLimitMs=*/0, /*fixedDepth=*/depth, /*silent=*/true);
-        auto t1 = std::chrono::steady_clock::now();
-
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        double nps = (ms > 0.1) ? (ai.nodesExplored / (ms / 1000.0)) : 0;
-
-        // Format move as e.g. "e2-e4"
-        char moveStr[16];
-        std::snprintf(moveStr, sizeof(moveStr), "%c%d-%c%d",
-            'a' + best.fromY, best.fromX + 1,
-            'a' + best.toY,   best.toX + 1);
-
-        std::cout << std::left
-                  << std::setw(8)  << depth
-                  << std::setw(14) << std::fixed << std::setprecision(1) << ms
-                  << std::setw(18) << commas(ai.nodesExplored)
-                  << std::setw(18) << commas(static_cast<long long>(nps))
-                  << std::setw(12) << moveStr
-                  << "\n";
-
-        // Cooldown between depths — keeps CPU usage comfortable
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        Color turn = board.loadFEN(pos.fen);
+        
+        auto start = std::chrono::high_resolution_clock::now();
+        (void)ai.getBestMove(board, turn, depth);
+        auto end = std::chrono::high_resolution_clock::now();
+        
+        double duration = std::chrono::duration<double>(end - start).count();
+        long long nodes = ai.nodesExplored;
+        
+        totalNodes += nodes;
+        totalTime += duration;
+        
+        totalStats.qNodes += ai.stats.qNodes;
+        totalStats.betaCutoffs += ai.stats.betaCutoffs;
+        totalStats.firstMoveCutoffs += ai.stats.firstMoveCutoffs;
+        totalStats.ttProbes += ai.stats.ttProbes;
+        totalStats.ttHits += ai.stats.ttHits;
+        totalStats.ttUsableHits += ai.stats.ttUsableHits;
+        totalStats.ttCutoffs += ai.stats.ttCutoffs;
+        totalStats.ttStores += ai.stats.ttStores;
+        totalStats.ttCollisions += ai.stats.ttCollisions;
+        totalStats.pvsSearches += ai.stats.pvsSearches;
+        totalStats.pvsResearches += ai.stats.pvsResearches;
+        totalStats.lmrAttempts += ai.stats.lmrAttempts;
+        totalStats.lmrReductions += ai.stats.lmrReductions;
+        totalStats.lmrResearches += ai.stats.lmrResearches;
+        totalStats.nullAttempts += ai.stats.nullAttempts;
+        totalStats.nullCutoffs += ai.stats.nullCutoffs;
+        totalStats.killerHits += ai.stats.killerHits;
+        
+        double nps = nodes / duration;
+        
+        std::cout << std::left << std::setw(20) << pos.name
+                  << std::setw(15) << nodes
+                  << std::setw(15) << std::fixed << std::setprecision(4) << duration
+                  << std::setw(15) << static_cast<long long>(nps) << std::endl;
     }
 
-    separator();
-    std::cout << "\n";
-}
-
-// ── Section 3: MVV-LVA ordering effectiveness ─────────────────────────────────
-// Compares nodes at depth 4 from start position (ordering always on now,
-// so this shows the improvement vs baseline naive ordering from old code).
-// We hardcode the "before" number from the old codebase for reference.
-
-static void benchOrdering() {
-    separator('=');
-    std::cout << "  MOVE ORDERING — MVV-LVA + TT  effectiveness\n";
-    separator('=');
-
-    // Baseline: old minimax at depth 4 from start = measured manually, ~45,000+ nodes
-    // (the original code had no ordering and no TT)
-    const long long baselineNodes = 45312; // approx from old depth-4 search
-    const double    baselineMs    = 180.0; // approx
-
-    Board board;
-    ChessAI ai;
-    auto t0 = std::chrono::steady_clock::now();
-    Move best = ai.getBestMove(board, WHITE, 0, 4, /*silent=*/true);
-    auto t1 = std::chrono::steady_clock::now();
-    (void)best;
-    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    long long nodes = ai.nodesExplored;
-
-    std::cout << "\n";
-    std::cout << "  Metric                 Before (naive)      After (MVV-LVA + TT)\n";
-    separator('-', 60);
-    std::cout << "  Nodes @ depth 4        " << std::setw(20) << commas(baselineNodes)
-              << commas(nodes) << "\n";
-    std::cout << "  Time  @ depth 4        " << std::setw(20)
-              << (std::to_string((int)baselineMs) + " ms")
-              << std::fixed << std::setprecision(0) << ms << " ms\n";
-
-    double ratio = (nodes > 0) ? ((double)baselineNodes / nodes) : 0;
-    std::cout << "  Pruning ratio                               "
-              << std::fixed << std::setprecision(2) << ratio << "x fewer nodes\n";
-
-    separator();
-    std::cout << "\n";
-}
-
-// ── Section 4: Iterative deepening time budget ────────────────────────────────
-
-static void benchIterativeDeepening() {
-    separator('=');
-    std::cout << "  ITERATIVE DEEPENING — depth reached in time budget\n";
-    separator('=');
-
-    // Use a short 500ms budget so this section doesn't take too long
-    std::cout << "  Time budget: 500 ms from start position\n\n";
-
-    Board board;
-    ChessAI ai;
-
-    auto t0 = std::chrono::steady_clock::now();
-    Move best = ai.getBestMove(board, WHITE, /*timeLimitMs=*/500, /*fixedDepth=*/0, /*silent=*/true);
-    auto t1 = std::chrono::steady_clock::now();
-    (void)best;
-
-    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    std::cout << "  Completed in " << std::fixed << std::setprecision(0) << ms << " ms"
-              << "  |  Total nodes: " << commas(ai.nodesExplored) << "\n";
-
-    separator();
-    std::cout << "\n";
-}
-
-// ── Entry point ───────────────────────────────────────────────────────────────
-
-void benchmark() {
-    std::cout << "\n";
-    separator('=');
-    std::cout << "  CHESS ENGINE BENCHMARK\n";
-    std::cout << "  Engine: Alpha-Beta Negamax + Iterative Deepening\n";
-    std::cout << "  Move ordering: MVV-LVA + Transposition Table\n";
-    separator('=');
-    std::cout << "\n";
-
-    benchPerft();
-    benchSearch();
-    benchOrdering();
-    benchIterativeDeepening();
-
-    separator('=');
-    std::cout << "  Benchmark complete.\n";
-    separator('=');
-    std::cout << "\n";
+    std::cout << std::string(65, '-') << std::endl;
+    std::cout << std::left << std::setw(20) << "TOTAL"
+              << std::setw(15) << totalNodes
+              << std::setw(15) << std::fixed << std::setprecision(4) << totalTime
+              << std::setw(15) << static_cast<long long>(totalNodes / totalTime) << "  (Avg NPS)" << std::endl;
+    std::cout << std::string(65, '-') << std::endl;
+    
+    // Programmatic telemetry block
+    std::cout << "\n[TELEMETRY]" << std::endl;
+    std::cout << "Nodes: " << totalNodes << std::endl;
+    std::cout << "QNodes: " << totalStats.qNodes << std::endl;
+    std::cout << "BetaCutoffs: " << totalStats.betaCutoffs << std::endl;
+    std::cout << "FirstMoveCutoffs: " << totalStats.firstMoveCutoffs << std::endl;
+    std::cout << "TTProbes: " << totalStats.ttProbes << std::endl;
+    std::cout << "TTHits: " << totalStats.ttHits << std::endl;
+    std::cout << "TTUsableHits: " << totalStats.ttUsableHits << std::endl;
+    std::cout << "TTCutoffs: " << totalStats.ttCutoffs << std::endl;
+    std::cout << "TTStores: " << totalStats.ttStores << std::endl;
+    std::cout << "TTCollisions: " << totalStats.ttCollisions << std::endl;
+    std::cout << "PVSSearches: " << totalStats.pvsSearches << std::endl;
+    std::cout << "PVSResearches: " << totalStats.pvsResearches << std::endl;
+    std::cout << "LMRAttempts: " << totalStats.lmrAttempts << std::endl;
+    std::cout << "LMRReductions: " << totalStats.lmrReductions << std::endl;
+    std::cout << "LMRResearches: " << totalStats.lmrResearches << std::endl;
+    std::cout << "NullAttempts: " << totalStats.nullAttempts << std::endl;
+    std::cout << "NullCutoffs: " << totalStats.nullCutoffs << std::endl;
+    std::cout << "KillerHits: " << totalStats.killerHits << std::endl;
+    std::cout << "[/TELEMETRY]" << std::endl;
 }
