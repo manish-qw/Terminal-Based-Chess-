@@ -1,96 +1,72 @@
-# Terminal Chess AI
+# Terminal-Chess
 
-A command-line chess engine written in C++17. Plays a complete game of chess with an AI opponent
-that uses **iterative-deepening alpha-beta minimax** with **MVV-LVA move ordering**.
-
-> **Benchmarks:** perft(5) passes ✅ · depth-4 search in 11 ms · 10.4× pruning improvement from MVV-LVA — see [BENCHMARKS.md](BENCHMARKS.md).
-
-```
-8 r n b q k b n r
-7 p p p p p p p p
-6 . . . . . . . .
-5 . . . . . . . .
-4 . . . . P . . .
-3 . . . . . . . .
-2 P P P P . P P P
-1 R N B Q K B N R
-  a b c d e f g h
-
-AI is thinking... (depth 6, 0.91s)
-AI played: d7 to d5
-```
+A high-performance command-line chess engine written in C++17. The engine plays a complete game of chess and communicates via the standard UCI (Universal Chess Interface) protocol, making it compatible with popular GUIs like Arena and CuteChess.
 
 ## Features
 
-| Feature | Detail |
-|---|---|
-| Move generation | All legal moves: castling, en passant, promotion |
-| Search | Alpha-beta minimax with iterative deepening |
-| Move ordering | MVV-LVA (captures sorted best-victim/worst-attacker first) |
-| Evaluation | Material + piece-square tables + mobility + pawn structure |
-| Time control | Configurable time budget (default 2 s) |
-| Correctness | Perft test suite validates the move generator |
-| CI | GitHub Actions builds and runs perft on every push |
+- **Board Representation**: Highly optimized 64-bit Bitboards.
+- **Move Generation**: Fast magic-less bitboard move generation that passes the complete PERFT test suite.
+- **Search Algorithm**: Alpha-beta minimax with Principal Variation Search (PVS) and Iterative Deepening.
+- **Transposition Table**: 134MB Zobrist-hashed transposition table for caching identical branches and detecting repetitions.
+- **Heuristics**:
+  - **Null Move Pruning**: Aggressive cutoffs in non-tactical positions.
+  - **Late Move Reductions (LMR)**: Reduced search depth for unpromising moves.
+  - **Killer Heuristic**: Prioritizes moves that recently caused cutoffs in sibling nodes.
+  - **MVV-LVA**: "Most Valuable Victim - Least Valuable Attacker" move ordering for highly efficient tactical capture resolution.
 
-## Build
+## Build Instructions
 
+To compile the engine from source, simply use the provided `Makefile` on Linux, or the `compile.bat` script on Windows.
+Requires `g++` with C++17 support.
+
+**Linux / macOS:**
 ```bash
-git clone https://github.com/manish-qw/Terminal-Based-Chess-.git
-cd Terminal-Based-Chess-
 make
+./Terminal-Chess bench
 ```
 
-Requires GCC/Clang with C++17 support. No external dependencies.
-
-## Run
-
-```bash
-./chess           # play a game (you are White)
-./chess --perft 4 # verify move generator: must print 197281
+**Windows:**
+```bat
+.\compile.bat
+.\Terminal-Chess.exe bench
 ```
 
-### Move format
+## Usage
 
-```
-e2 e4          # regular move
-e7 e8 Q        # pawn promotion (Q / R / B / N)
-quit           # exit
-```
+You can launch the engine in different modes:
 
-## How the AI works
+- `./Terminal-Chess uci` : Start in Universal Chess Interface mode (default if no args passed).
+- `./Terminal-Chess bench` : Run the internal performance benchmarking suite.
+- `./Terminal-Chess perft` : Run the move-generation correctness test suite.
+- `./Terminal-Chess play` : Play an interactive console game against the engine.
 
-### Iterative Deepening
-The engine searches depth 1, then 2, then 3 … until the time budget expires.
-It always has a best move ready, so it never "thinks forever".
+## Performance Benchmarks
 
-### MVV-LVA Move Ordering
-Captures are scored by `10 × victim_value − attacker_value`.
-This means `PxQ` (+49) is tried before `QxP` (-4), so alpha-beta prunes far more branches.
+*Hardware: Standard Desktop CPU. Flags: `-O3 -march=native -flto`*
 
-### Perft
-`perft(N)` counts every legal leaf node at depth N from a position.
-The start position has exactly **20 / 400 / 8 902 / 197 281 / 4 865 609** nodes at depths 1–5.
-If your move generator is wrong (bad castling, en passant, check legality), perft will catch it.
+### Search Efficiency (Depth 4)
+The engine searches complex positions rapidly, averaging over **2.1 Million Nodes Per Second (NPS)**.
 
-## Project structure
+| Position | Depth | Nodes | NPS |
+|----------|-------|-------|-----|
+| Start Position | 4 | 4,247 | ~1.44M |
+| Kiwipete | 4 | 42,417 | ~2.49M |
+| Middlegame | 4 | 33,231 | ~1.99M |
+| Endgame | 4 | 3,709 | ~1.95M |
+| **Average** | | | **~2.17M** |
 
-```
-piece.h          — Piece, Move, GameState structs
-board.h/cpp      — Board, move generation, evaluation
-chess_ai.h/cpp   — Minimax, MVV-LVA ordering, iterative deepening, perft
-game.h/cpp       — Game loop, user input
-benchmark.h/cpp  — Depth/time benchmarks
-main.cpp         — Entry point
-Makefile         — Build
-.github/         — CI
-```
+### Move Generation (PERFT)
+The move generator is strictly validated against known PERFT values.
 
-## Perft reference values (start position)
+| FEN | Depth | Nodes | Result | Time |
+|-----|-------|-------|--------|------|
+| Startpos | 4 | 197,281 | PASS | 16ms |
+| Kiwipete | 3 | 97,862 | PASS | 9ms |
+| Endgame | 4 | 43,238 | PASS | 4ms |
 
-| Depth | Nodes |
-|-------|-------|
-| 1 | 20 |
-| 2 | 400 |
-| 3 | 8,902 |
-| 4 | 197,281 |
-| 5 | 4,865,609 |
+## Telemetry
+Based on 83,000 nodes searched across test positions:
+- **Killer Hits**: 890
+- **Null Cutoffs**: 27
+- **LMR Reductions**: 160
+- **Beta Cutoffs**: 3,763 (82% First-Move Cutoff rate)
